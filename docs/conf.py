@@ -113,7 +113,10 @@ def linkcode_resolve(domain, info):
     # TODO: attempt to read branch from CI config?
     tag = "master"  # if 'dev' in release else ('v' + release)
 
-    return "https://github.com/maximz/xgboost-label-encoding/blob/%s/%s" % (tag, filename)
+    return "https://github.com/maximz/xgboost-label-encoding/blob/%s/%s" % (
+        tag,
+        filename,
+    )
 
 
 # -- Options for HTML output -------------------------------------------
