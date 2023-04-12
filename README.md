@@ -1,8 +1,8 @@
-# Xgboost Label Encoding
+# Xgboost Label Encoding (WIP)
 
 [![](https://img.shields.io/pypi/v/xgboost_label_encoding.svg)](https://pypi.python.org/pypi/xgboost_label_encoding)
 [![CI](https://github.com/maximz/xgboost-label-encoding/actions/workflows/ci.yaml/badge.svg?branch=master)](https://github.com/maximz/xgboost-label-encoding/actions/workflows/ci.yaml)
-[![](https://img.shields.io/badge/docs-here-blue.svg)](https://xgboost_label_encoding.maximz.com)
+[![](https://img.shields.io/badge/docs-here-blue.svg)](https://xgboost-label-encoding.maximz.com)
 [![](https://img.shields.io/github/stars/maximz/xgboost-label-encoding?style=social)](https://github.com/maximz/xgboost-label-encoding)
 
 ## TODOs: Configuring this template
