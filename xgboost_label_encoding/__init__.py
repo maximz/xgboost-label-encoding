@@ -2,7 +2,7 @@
 
 __author__ = """Maxim Zaslavsky"""
 __email__ = "maxim@maximz.com"
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 # Set default logging handler to avoid "No handler found" warnings.
 import logging
@@ -43,7 +43,7 @@ class XGBoostClassifierWithLabelEncoding(xgb.XGBClassifier):
         X: np.ndarray,
         y: np.ndarray,
         sample_weight: Optional[np.ndarray] = None,
-        **kwargs
+        **kwargs,
     ) -> Self:
         if self.class_weight is not None:
             # Use sklearn to compute class weights, then map to individual sample weights
@@ -66,6 +66,11 @@ class XGBoostClassifierWithLabelEncoding(xgb.XGBClassifier):
         # Encode y labels
         self.label_encoder_ = LabelEncoder()
         transformed_y = self.label_encoder_.fit_transform(y)
+
+        if len(self.label_encoder_.classes_) < 2:
+            raise ValueError(
+                f"Training data needs to have at least 2 classes, but the data contains only one class: {self.label_encoder_.classes_[0]}"
+            )
 
         # fit as usual
         super().fit(X, transformed_y, sample_weight=sample_weight, **kwargs)
