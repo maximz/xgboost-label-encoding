@@ -10,7 +10,7 @@ with open("README.md") as readme_file:
 with open("CHANGELOG.md") as history_file:
     history = history_file.read()
 
-requirements = ["scikit-learn", "xgboost", "numpy", "typing_extensions"]
+requirements = ["scikit-learn", "xgboost<2", "numpy", "typing_extensions"]
 
 setup_requirements = [
     "pytest-runner",
@@ -29,7 +29,7 @@ setup(
         include=["xgboost_label_encoding", "xgboost_label_encoding.*"]
     ),
     python_requires=">=3.8",
-    version="0.0.2",
+    version="0.0.3",
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",
         "Intended Audience :: Developers",
