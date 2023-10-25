@@ -2,7 +2,7 @@
 
 __author__ = """Maxim Zaslavsky"""
 __email__ = "maxim@maximz.com"
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 # Set default logging handler to avoid "No handler found" warnings.
 import logging
@@ -12,7 +12,7 @@ logging.getLogger(__name__).addHandler(NullHandler())
 
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union
 from typing_extensions import Self
 import sklearn.utils.class_weight
 import xgboost as xgb
@@ -81,3 +81,21 @@ class XGBoostClassifierWithLabelEncoding(xgb.XGBClassifier):
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         return self.label_encoder_.inverse_transform(super().predict(X))
+
+    def get_xgb_params(self) -> Dict[str, Any]:
+        """
+        Get xgboost-specific parameters to be passed into the underlying xgboost C++ code.
+        Override the default get_xgb_params() implementation to exclude our wrapper's class_weight parameter from being passed through into xgboost core.
+
+        This avoids the following warning from xgboost:
+        WARNING: xgboost/src/learner.cc:767:
+        Parameters: { "class_weight" } are not used.
+        """
+        # Original implementation: https://github.com/dmlc/xgboost/blob/d4d7097accc4db7d50fdc2b71b643925db6bc424/python-package/xgboost/sklearn.py#L795-L816
+        params = super().get_xgb_params()
+
+        # Drop "class_weight" from params
+        if "class_weight" in params:  # it should be
+            del params["class_weight"]
+
+        return params

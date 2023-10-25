@@ -101,3 +101,25 @@ def test_fit_binary_without_specifying_objective(data_binary):
     assert all(
         predicted_label in clf.classes_ for predicted_label in clf.predict(X_binary)
     )
+
+
+def test_class_weight_parameter_hidden_from_inner_xgboost(data):
+    X, y = data
+
+    # Confirm that class_weight is not passed to inner xgboost
+    # Otherwise, we'd get this warning from calling fit():
+    # WARNING: xgboost/src/learner.cc:767:
+    # Parameters: { "class_weight" } are not used.
+    clf = XGBoostClassifierWithLabelEncoding(
+        n_estimators=10,
+        class_weight="balanced",
+    ).fit(X, y)
+
+    assert clf.class_weight == "balanced"
+    assert "class_weight" not in clf.get_xgb_params()
+
+    # Confirm again after cloning
+    clf = sklearn.base.clone(clf)
+    clf = clf.fit(X, y)
+    assert clf.class_weight == "balanced"
+    assert "class_weight" not in clf.get_xgb_params()
