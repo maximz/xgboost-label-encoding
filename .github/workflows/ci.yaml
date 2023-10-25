@@ -48,6 +48,8 @@ jobs:
           python -m pip install --upgrade pip wheel
           pip install -r requirements_dev.txt
           pip install -U codecov
+      - name: Print out pip freeze
+        run: pip freeze
       - name: Lint
         run: |
             pre-commit install
@@ -66,6 +68,22 @@ jobs:
       - name: Upload coverage on success
         uses: codecov/codecov-action@v1
         if: ${{ success() }}
+
+      # Above we confirmed we support xgboost 2.x. Now also confirm we support xgboost 1.x.
+      - name: Install older xgboost (1.x)
+        run: |
+          pip install --upgrade 'xgboost<2'
+      - name: Print out pip freeze after installing older xgboost
+        run: pip freeze
+      - name: Rerun tests with older xgboost
+        # use temporary directory cleaned up after every job
+        run: pytest --basetemp={runner.temp} --cov=./ --cov-report xml
+      - name: Upload pytest test result artifacts on failure
+        uses: actions/upload-artifact@v2
+        with:
+          name: pytest-results-${{ matrix.python-version }}
+          path: tests/results
+        if: ${{ failure() }}
 
   docs:
     # can we avoid rebuilding netlify cli docker image every time? https://github.com/netlify/actions/issues/19

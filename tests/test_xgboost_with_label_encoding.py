@@ -6,6 +6,7 @@ import pytest
 from xgboost_label_encoding import (
     XGBoostClassifierWithLabelEncoding,
 )
+from sklearn.preprocessing import LabelEncoder
 
 
 def test_sklearn_clonable():
@@ -19,13 +20,13 @@ def test_sklearn_clonable():
     assert not hasattr(estimator, "classes_")
     assert not hasattr(estimator_clone, "classes_")
 
-    # pretend it is fitted
-    estimator.classes_ = np.array(["a", "b"])
-    assert hasattr(estimator, "classes_")
+    # pretend it is fitted by setting an attribute that has an underscore suffix
+    estimator.label_encoder_ = LabelEncoder()
+    assert hasattr(estimator, "label_encoder_")
 
     # confirm clone is not fitted
     estimator_clone_2 = sklearn.base.clone(estimator)
-    assert not hasattr(estimator_clone_2, "classes_")
+    assert not hasattr(estimator_clone_2, "label_encoder_")
 
 
 @pytest.fixture
@@ -47,7 +48,11 @@ def test_xgboost_label_encoding(data):
     clf = XGBoostClassifierWithLabelEncoding(
         n_estimators=10,
         objective="multi:softprob",
-    ).fit(X, y)
+    )
+    assert not hasattr(clf, "classes_")
+    assert not clf.__sklearn_is_fitted__()
+    clf = clf.fit(X, y)
+    assert clf.__sklearn_is_fitted__()
     assert np.array_equal(clf.classes_, ["Covid", "HIV", "Healthy"])
     assert clf.predict(X).shape == (5,)
     assert clf.predict_proba(X).shape == (5, 3)
