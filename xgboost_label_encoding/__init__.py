@@ -341,7 +341,11 @@ class XGBoostCV(xgb.XGBClassifier):
             """
             cv_results = xgb.cv(
                 dtrain=dtrain,
-                params=params | extra_params,
+                # using syntax compatible with python<3.9:
+                params={
+                    **params,
+                    **extra_params,
+                },
                 nfold=len(cv_splits),
                 folds=cv_splits,
                 # Use maximum number of boosting rounds (maximum n_estimators).
