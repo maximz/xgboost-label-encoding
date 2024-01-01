@@ -3,14 +3,38 @@ import pandas as pd
 import sklearn.base
 import pytest
 from sklearn.datasets import make_classification
+from sklearn.model_selection import StratifiedKFold
 
 from xgboost_label_encoding import (
     XGBoostClassifierWithLabelEncoding,
+    XGBoostClassifierWithLabelEncodingWithCV,
 )
 
 
-def test_sklearn_clonable():
-    estimator = XGBoostClassifierWithLabelEncoding()
+@pytest.fixture
+def clf_basic():
+    return XGBoostClassifierWithLabelEncoding(n_estimators=10, class_weight="balanced")
+
+
+@pytest.fixture
+def clf_cv():
+    return XGBoostClassifierWithLabelEncodingWithCV(
+        cv=StratifiedKFold(n_splits=2), max_num_trees=20, class_weight="balanced"
+    )
+
+
+# To pass fixtures to parametrize(), we use the lazy_fixture extension.
+model_fixtures = [
+    pytest.lazy_fixture("clf_basic"),
+    pytest.lazy_fixture("clf_cv"),
+]
+
+
+@pytest.mark.parametrize(
+    "estimator",
+    model_fixtures,
+)
+def test_sklearn_clonable(estimator):
     # Check that supports cloning with sklearn.base.clone
     estimator_clone = sklearn.base.clone(estimator)
 
@@ -30,43 +54,69 @@ def test_sklearn_clonable():
 
 
 @pytest.fixture
-def data():
-    X = pd.DataFrame(np.random.randn(5, 5))
-    y = pd.Series(["HIV", "Healthy", "Covid", "Healthy", "Covid"])
+def data_multiclass():
+    X, y = make_classification(
+        n_samples=100, n_features=5, n_classes=3, n_clusters_per_class=1
+    )
+    y = pd.Series(y).replace(dict(enumerate(["Covid", "Healthy", "HIV"]))).to_numpy()
     return X, y
 
 
 @pytest.fixture
 def data_binary():
-    X = pd.DataFrame(np.random.randn(5, 5))
-    y = pd.Series(["HIV", "Healthy", "HIV", "Healthy", "HIV"])
+    X, y = make_classification(
+        n_samples=100, n_features=5, n_classes=2, n_clusters_per_class=1
+    )
+    y = pd.Series(y).replace(dict(enumerate(["Healthy", "HIV"]))).to_numpy()
     return X, y
 
 
-def test_xgboost_label_encoding(data):
+# To pass fixtures to parametrize(), we use the lazy_fixture extension.
+data_fixtures = [
+    pytest.lazy_fixture("data_multiclass"),
+    pytest.lazy_fixture("data_binary"),
+]
+
+
+@pytest.fixture
+def bad_data():
+    # This data should cause fitting a model that learns nothing.
+    X = pd.DataFrame(np.random.randn(7, 5))
+    y = pd.Series(["HIV", "Healthy", "Covid", "Healthy", "Covid", "HIV", "Healthy"])
+    return X, y
+
+
+@pytest.mark.parametrize("data", data_fixtures)
+@pytest.mark.parametrize(
+    "clf",
+    model_fixtures,
+)
+def test_xgboost_label_encoding(data, clf):
     X, y = data
-    clf = XGBoostClassifierWithLabelEncoding(
-        n_estimators=10,
-        objective="multi:softprob",
-    ).fit(X, y)
-    assert np.array_equal(clf.classes_, ["Covid", "HIV", "Healthy"])
+    clf = clf.fit(X, y)
+    unique_classes = np.unique(y)
+    assert np.array_equal(clf.classes_, unique_classes)
     assert clf.predict(X).shape == (len(y),)
-    assert clf.predict_proba(X).shape == (len(y), 3)
+    assert clf.predict_proba(X).shape == (len(y), len(unique_classes))
     assert all(predicted_label in clf.classes_ for predicted_label in clf.predict(X))
     # Confirm again that cloning works, even after a real fit
     sklearn.base.clone(clf)
 
 
-def test_has_other_sklearn_properties(data):
+@pytest.mark.parametrize("data", data_fixtures)
+@pytest.mark.parametrize(
+    "clf",
+    model_fixtures,
+)
+def test_has_other_sklearn_properties(data, clf):
     X, y = data
     # set feature names
+    X = pd.DataFrame(X)
     X = X.rename(columns=lambda s: f"col{s}")
     assert np.array_equal(X.columns, ["col0", "col1", "col2", "col3", "col4"])
 
     # Fit without feature names first
-    clf = XGBoostClassifierWithLabelEncoding(
-        n_estimators=10,
-    ).fit(X.values, y)
+    clf = clf.fit(X.values, y)
     assert clf.n_features_in_ == X.shape[1]
     assert not hasattr(clf, "feature_names_in_")
 
@@ -78,42 +128,39 @@ def test_has_other_sklearn_properties(data):
     assert clf.feature_importances_.shape == (X.shape[1],)
 
 
-# Sanity check that we don't need to set objective
-def test_fit_multiclass_without_specifying_objective(data):
+@pytest.mark.parametrize("data", data_fixtures)
+@pytest.mark.parametrize(
+    "clf",
+    model_fixtures,
+)
+def test_fit_without_specifying_objective(data, clf):
+    """Sanity check that we don't need to set binary or multiclass objective manually. Relies on model_fixtures not having objective pre-set."""
     X, y = data
-    clf = XGBoostClassifierWithLabelEncoding(
-        n_estimators=10,
-    ).fit(X, y)
-    assert np.array_equal(clf.classes_, ["Covid", "HIV", "Healthy"])
+    clf = clf.fit(X, y)
+    unique_classes = np.unique(y)
+    assert np.array_equal(clf.classes_, unique_classes)
     assert clf.predict(X).shape == (len(y),)
-    assert clf.predict_proba(X).shape == (len(y), 3)
+    assert clf.predict_proba(X).shape == (len(y), len(unique_classes))
     assert all(predicted_label in clf.classes_ for predicted_label in clf.predict(X))
 
 
-def test_fit_binary_without_specifying_objective(data_binary):
-    X_binary, y_binary = data_binary
-    clf = XGBoostClassifierWithLabelEncoding(
-        n_estimators=10,
-    ).fit(X_binary, y_binary)
-    assert np.array_equal(clf.classes_, ["HIV", "Healthy"])
-    assert clf.predict(X_binary).shape == (len(y_binary),)
-    assert clf.predict_proba(X_binary).shape == (len(y_binary), 2)
-    assert all(
-        predicted_label in clf.classes_ for predicted_label in clf.predict(X_binary)
-    )
+@pytest.mark.parametrize("data", data_fixtures)
+@pytest.mark.parametrize(
+    "clf",
+    model_fixtures,
+)
+def test_class_weight_parameter_hidden_from_inner_xgboost(data, clf):
+    """
+    Confirm that class_weight is not passed to inner xgboost
+    Otherwise, we'd get this warning from calling fit():
+    WARNING: xgboost/src/learner.cc:767:
+    Parameters: { "class_weight" } are not used.
 
-
-def test_class_weight_parameter_hidden_from_inner_xgboost(data):
+    Relies on model_fixtures having class_weight="balanced" set.
+    """
     X, y = data
 
-    # Confirm that class_weight is not passed to inner xgboost
-    # Otherwise, we'd get this warning from calling fit():
-    # WARNING: xgboost/src/learner.cc:767:
-    # Parameters: { "class_weight" } are not used.
-    clf = XGBoostClassifierWithLabelEncoding(
-        n_estimators=10,
-        class_weight="balanced",
-    ).fit(X, y)
+    clf = clf.fit(X, y)
 
     assert clf.class_weight == "balanced"
     assert "class_weight" not in clf.get_xgb_params()
@@ -127,7 +174,11 @@ def test_class_weight_parameter_hidden_from_inner_xgboost(data):
     assert "class_weight" not in clf.get_xgb_params()
 
 
-def test_fit_with_illegal_feature_names():
+@pytest.mark.parametrize(
+    "clf",
+    model_fixtures,
+)
+def test_fit_with_illegal_feature_names(clf):
     # Create a simple classification problem
     # Include forbidden characters in column names
     # "feature_names must be string, and may not contain [, ] or <"
@@ -135,9 +186,6 @@ def test_fit_with_illegal_feature_names():
     X, y = make_classification(n_samples=100, n_features=len(original_column_names))
     X = pd.DataFrame(X, columns=original_column_names)
     assert np.array_equal(X.columns, original_column_names)
-
-    # Initialize the classifier
-    clf = XGBoostClassifierWithLabelEncoding()
 
     # Fit the model
     clf.fit(X, y)
@@ -170,7 +218,13 @@ def test_fit_with_illegal_feature_names():
     ), "Transformed feature names do not match the inner model."
 
 
-def test_unique_renaming_of_columns():
+@pytest.mark.parametrize(
+    "clf",
+    model_fixtures,
+)
+def test_unique_renaming_of_columns(
+    clf,
+):
     # Create a DataFrame where columns would have the same name after forbidden character removal
     # Renaming replaces [, ] and < with _
     cols = [
@@ -186,7 +240,6 @@ def test_unique_renaming_of_columns():
     ]
     X, y = make_classification(n_samples=100, n_features=len(cols))
     X = pd.DataFrame(X, columns=cols)
-    clf = XGBoostClassifierWithLabelEncoding()
 
     # Fit the classifier
     clf.fit(X, y)
@@ -217,3 +270,27 @@ def test_unique_renaming_of_columns():
     assert np.array_equal(
         clf.feature_names_in_, X.columns
     ), "The preserved feature names do not match the original."
+
+
+@pytest.mark.parametrize("data", data_fixtures)
+def test_cv(clf_cv, data):
+    # Confirm CV is happening
+    X, y = data
+
+    clf_cv.max_num_trees = 200
+
+    # Fit the model
+    clf_cv.fit(X, y)
+
+    # Early stopping would have stopped the training before 200 estimators
+    assert clf_cv.n_estimators < 200
+    # And shouldn't be 100, the default number of estimators
+    assert clf_cv.n_estimators != 100
+
+
+# @pytest.mark.parametrize("clf", model_fixtures)
+# Not able to get this to fail with clf_basic weirdly, even if setting clf.n_estimators = 1
+def test_fit_fails_if_feature_importances_are_all_zero(bad_data, clf_cv):
+    X, y = bad_data
+    with pytest.raises(ValueError, match="All feature importances are zero"):
+        clf_cv.fit(X, y)
