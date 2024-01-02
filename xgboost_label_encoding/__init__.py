@@ -217,6 +217,9 @@ class XGBoostCV(xgb.XGBClassifier):
         cv: sklearn.model_selection.BaseCrossValidator,
         param_grid: Optional[dict] = None,
         max_num_trees: int = 200,
+        # Translates to early_stopping_rounds, but distinct name to not confuse the final post-CV XGBClassifier into thinking we want early stopping.
+        # If we name this early_stopping_rounds, we get the following error: AssertionError: Must have at least 1 validation dataset for early stopping.
+        early_stopping_patience: int = 10,
         n_jobs: int = 1,
         # Specify metric and objective for binary and multiclass settings.
         metric_binary: str = "logloss",
@@ -236,12 +239,17 @@ class XGBoostCV(xgb.XGBClassifier):
             Do not include early_stopping_rounds
             If not supplied, we try a small set of learning rates and min_child_weights.
             See https://xgboost.readthedocs.io/en/release_1.7.0/parameter.html
+
+        early_stopping_patience:
+            Used as early_stopping_rounds parameter to xgboost.cv().
+            But not used in final model fit. We instead use the best number of boosting rounds found by early stopping.
         """
         super().__init__(**kwargs)
         # Make sure to register these parameters for removal in get_xgb_params()
         self.cv = cv
         self.param_grid = param_grid
         self.max_num_trees = max_num_trees
+        self.early_stopping_patience = early_stopping_patience
         self.n_jobs = n_jobs
         self.metric_binary = metric_binary
         self.metric_multiclass = metric_multiclass
@@ -261,6 +269,7 @@ class XGBoostCV(xgb.XGBClassifier):
             "cv",
             "param_grid",
             "max_num_trees",
+            "early_stopping_patience",
             "metric_binary",
             "metric_multiclass",
             "objective_binary",
@@ -351,7 +360,7 @@ class XGBoostCV(xgb.XGBClassifier):
                 # Use maximum number of boosting rounds (maximum n_estimators).
                 # Early stopping will find the optimal number of boosting rounds
                 num_boost_round=self.max_num_trees,
-                early_stopping_rounds=10,
+                early_stopping_rounds=self.early_stopping_patience,
                 metrics=metric,
                 as_pandas=True,
                 # This seed is ignored. (It's used to generate the folds, which has already happened by this point. Configure the seed in the cv object instead.)
@@ -418,6 +427,7 @@ class XGBoostClassifierWithLabelEncodingWithCV(
         cv: sklearn.model_selection.BaseCrossValidator,
         param_grid: Optional[dict] = None,
         max_num_trees: int = 200,
+        early_stopping_patience: int = 10,
         n_jobs: int = 1,
         metric_binary: str = "logloss",
         metric_multiclass: str = "mlogloss",
@@ -430,6 +440,7 @@ class XGBoostClassifierWithLabelEncodingWithCV(
             cv=cv,
             param_grid=param_grid,
             max_num_trees=max_num_trees,
+            early_stopping_patience=early_stopping_patience,
             n_jobs=n_jobs,
             metric_binary=metric_binary,
             metric_multiclass=metric_multiclass,

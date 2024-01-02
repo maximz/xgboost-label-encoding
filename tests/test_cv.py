@@ -17,7 +17,7 @@ def test_cv(num_classes: int):
 
     # use StratifiedGroupKFoldRequiresGroups instead of StratifiedKFold to ensure groups parameter goes through
     # if groups not provided, it will raise ValueError: StratifiedGroupKFoldRequiresGroups requires groups argument to be provided to split().
-    cv = StratifiedGroupKFoldRequiresGroups()
+    cv = StratifiedGroupKFoldRequiresGroups(n_splits=2, random_state=42, shuffle=True)
 
     # Initialize the classifier
     clf = XGBoostCV(cv=cv)

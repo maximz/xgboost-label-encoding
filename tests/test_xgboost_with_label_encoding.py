@@ -22,7 +22,9 @@ def clf_basic():
 @pytest.fixture
 def clf_cv():
     return XGBoostClassifierWithLabelEncodingWithCV(
-        cv=StratifiedKFold(n_splits=2), max_num_trees=20, class_weight="balanced"
+        cv=StratifiedKFold(n_splits=2, random_state=42, shuffle=True),
+        max_num_trees=20,
+        class_weight="balanced",
     )
 
 
@@ -330,7 +332,7 @@ def test_fit_fails_if_feature_importances_are_all_zero(bad_data, clf_cv):
 def test_cv_groups_parameter_passed_through(data):
     # use StratifiedGroupKFoldRequiresGroups instead of StratifiedKFold to ensure groups parameter goes through
     # if groups not provided, it will raise ValueError: StratifiedGroupKFoldRequiresGroups requires groups argument to be provided to split().
-    cv = StratifiedGroupKFoldRequiresGroups(n_splits=2)
+    cv = StratifiedGroupKFoldRequiresGroups(n_splits=2, random_state=42, shuffle=True)
     clf = XGBoostClassifierWithLabelEncodingWithCV(
         cv=cv, max_num_trees=20, class_weight="balanced"
     )
