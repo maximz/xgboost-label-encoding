@@ -411,6 +411,8 @@ class XGBoostClassifierWithLabelEncodingWithCV(
     See XGBoostClassifierWithLabelEncoding and XGBoostCV docs for details.
     """
 
+    # We use multiple inheritance to combine the two classes.
+    # Through the module resolution order, we ensure that XGBoostClassifierWithLabelEncoding.fit() will call XGBoostCV.fit() rather than XGBClassifier.fit(). XGBoostCV.fit() will of course eventually call XGBClassifier.fit().
     def __init__(
         self,
         cv: sklearn.model_selection.BaseCrossValidator,

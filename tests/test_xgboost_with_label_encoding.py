@@ -8,6 +8,7 @@ from sklearn.model_selection import StratifiedKFold
 from xgboost_label_encoding import (
     XGBoostClassifierWithLabelEncoding,
     XGBoostClassifierWithLabelEncodingWithCV,
+    XGBoostCV,
 )
 
 
@@ -270,6 +271,33 @@ def test_unique_renaming_of_columns(
     assert np.array_equal(
         clf.feature_names_in_, X.columns
     ), "The preserved feature names do not match the original."
+
+
+@pytest.mark.parametrize("data", data_fixtures)
+@pytest.mark.parametrize(
+    ["clf", "expected_to_call_xgboostcv_fit"],
+    [(pytest.lazy_fixture("clf_cv"), True), (pytest.lazy_fixture("clf_basic"), False)],
+)
+def test_cv_module_resolution_order(
+    clf, expected_to_call_xgboostcv_fit: bool, data, mocker
+):
+    """
+    Make sure that calling XGBoostClassifierWithLabelEncodingWithCV.fit() calls XGBoostCV.fit() first, not XGBClassifier.fit() directly
+    This is controlled by the MRO (method resolution order) of the class.
+    """
+    # We want to check that XGBoostCV.fit() is called first.
+    # Instead of mocker.patch.object(XGBoostCV, "fit" followed by XGBoostCV.fit.assert_called(),
+    # use a spy to preserve the functionality of the method, so that rest of XGBoostClassifierWithLabelEncodingWithCV.fit() works.
+    spy = mocker.spy(XGBoostCV, "fit")
+
+    clf.fit(*data)
+
+    if expected_to_call_xgboostcv_fit:
+        # Check that XGBoostCV's fit method was called, which means it was called first rather than XGBClassifier's fit method being called directly
+        spy.assert_called()
+    else:
+        # Also sanity check that XGBoostCV's fit method was not called for clf_basic
+        spy.assert_not_called()
 
 
 @pytest.mark.parametrize("data", data_fixtures)
