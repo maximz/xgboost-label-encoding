@@ -2,7 +2,7 @@
 
 __author__ = """Maxim Zaslavsky"""
 __email__ = "maxim@maximz.com"
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 # Set default logging handler to avoid "No handler found" warnings.
 import logging
@@ -436,5 +436,26 @@ class XGBoostClassifierWithLabelEncodingWithCV(
             metric_lower_is_better=metric_lower_is_better,
             class_weight=class_weight,
             fail_if_nothing_learned=fail_if_nothing_learned,
+            **kwargs,
+        )
+
+    def fit(
+        self,
+        X: Union[np.ndarray, pd.DataFrame],
+        y: np.ndarray,
+        sample_weight: Optional[np.ndarray] = None,
+        groups: Optional[np.ndarray] = None,
+        **kwargs,
+    ) -> Self:
+        # This looks like an unnecessary override.
+        # But what it's doing is advertising that fit() supports the groups parameter here explicitly.
+        # This is because XGBoostClassifierWithLabelEncodingWithCV's fit() will call XGBoostCV.fit(), which will pass groups to the CV splitter.
+        # In comparison, XGBoostClassifierWithLabelEncoding's fit() will call XGBClassifier.fit(), which does not accept groups.
+        return super().fit(
+            X=X,
+            y=y,
+            sample_weight=sample_weight,
+            # XGBoostClassifierWithLabelEncoding.fit() (which is super().fit() in this case) sees groups as just another kwarg to pass to its underlying fit()
+            groups=groups,
             **kwargs,
         )
