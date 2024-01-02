@@ -233,16 +233,40 @@ class XGBoostCV(xgb.XGBClassifier):
         """
         Run cross-validation to choose the best hyperparameters for an XGBoost model.
 
-        Param_grid: list of hyperparameter dicts to try.
+        Parameters:
+
+        - cv
+            Use this cross validation splitter. Groups argument will be fed through.
+
+        - param_grid
+            List of hyperparameter dicts to try.
             Make sure the parameter names are valid for both xgboost's native API and xgboost's sklearn API.
             Do not include number of trees (called "num_boost_round" in native API, aka "n_estimators" for xgboost's sklearn API)
-            Do not include early_stopping_rounds
-            If not supplied, we try a small set of learning rates and min_child_weights.
+            Do not include early_stopping_rounds either.
+            If param_grid is not specified, by default we will try a small set of learning rates and min_child_weights.
             See https://xgboost.readthedocs.io/en/release_1.7.0/parameter.html
 
-        early_stopping_patience:
+        - max_num_trees
+            Look for best number of trees (aka n_estimators and number of xgboost iterations).
+            The final n_estimators will be below this number.
+
+        - early_stopping_patience
             Used as early_stopping_rounds parameter to xgboost.cv().
-            But not used in final model fit. We instead use the best number of boosting rounds found by early stopping.
+            Require this many rounds of no improvement before stopping:
+
+            Note: this value is not used directly in the final model fit operation.
+            We instead use the best number of boosting rounds found by early stopping.
+            To be more precise: After early stopping in each fold during CV operation, we go back to the best iteration across folds and use that number of iterations for final model.
+
+        - n_jobs
+            How many hyperparameter settings to try at once in parallel.
+            Each hyperparameter setting is launched as a joblib.Parallel job that calls xgboost.cv() for multi-fold cross validation with those chosen parameters.
+
+        - metric_binary, metric_multiclass, metric_lower_is_better
+            Configures the metric to use for cross validation and early stopping.
+
+        - objective_binary, objective_multiclass
+            Configures the objective to use for xgboost.cv() fits.
         """
         super().__init__(**kwargs)
         # Make sure to register these parameters for removal in get_xgb_params()
