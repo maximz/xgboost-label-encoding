@@ -2,7 +2,7 @@
 
 __author__ = """Maxim Zaslavsky"""
 __email__ = "maxim@maximz.com"
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 
 # Set default logging handler to avoid "No handler found" warnings.
 import logging
@@ -14,10 +14,13 @@ import numpy as np
 import pandas as pd
 import re
 from sklearn.preprocessing import LabelEncoder
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 from typing_extensions import Self
 import sklearn.utils.class_weight
 import xgboost as xgb
+from joblib import Parallel, delayed
+import inspect
+import sklearn.model_selection
 
 
 class XGBoostClassifierWithLabelEncoding(xgb.XGBClassifier):
@@ -31,18 +34,24 @@ class XGBoostClassifierWithLabelEncoding(xgb.XGBClassifier):
     Use this in place of XGBClassifier, and `y` will automatically be label encoded.
 
     Additional features:
-    - automatic class weight rebalancing as in sklearn
-    - automatic renaming of column names passed through to xgboost to avoid xgboost error: "feature_names must be string, and may not contain [, ] or <"
+    - Automatic class weight rebalancing as in sklearn
+    - Automatic renaming of column names passed through to xgboost to avoid xgboost error: "feature_names must be string, and may not contain [, ] or <"
+    - Automatic rejection of the fitted model if all feature importances are zero. This is a sign that the model did not learn anything. Consider changing the hyperparameters. (Set fail_if_nothing_learned=False to disable)
     """
 
     _original_feature_names_: Optional[np.ndarray]
     _transformed_feature_names_: Optional[np.ndarray]
 
     def __init__(
-        self, class_weight: Optional[Union[dict, str]] = None, **kwargs
+        self,
+        class_weight: Optional[Union[dict, str]] = None,
+        fail_if_nothing_learned: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.class_weight = class_weight
+        # fail_if_nothing_learned: Rejects the final model if all feature importances are zero. This is a sign that the model did not learn anything. Consider changing the hyperparameters.
+        self.fail_if_nothing_learned = fail_if_nothing_learned
 
     def fit(
         self,
@@ -127,6 +136,12 @@ class XGBoostClassifierWithLabelEncoding(xgb.XGBClassifier):
         # fit as usual
         super().fit(X, transformed_y, sample_weight=sample_weight, **kwargs)
 
+        # Reject the model if all feature importances are zero.
+        if self.fail_if_nothing_learned and np.allclose(self.feature_importances_, 0):
+            raise ValueError(
+                "All feature importances are zero. This is a sign that the model did not learn anything. Consider changing the hyperparameters."
+            )
+
         # set classes_
         self.classes_: np.ndarray = self.label_encoder_.classes_
         return self
@@ -184,8 +199,242 @@ class XGBoostClassifierWithLabelEncoding(xgb.XGBClassifier):
         # Original implementation: https://github.com/dmlc/xgboost/blob/d4d7097accc4db7d50fdc2b71b643925db6bc424/python-package/xgboost/sklearn.py#L795-L816
         params = super().get_xgb_params()
 
-        # Drop "class_weight" from params
-        if "class_weight" in params:  # it should be
-            del params["class_weight"]
+        params_to_remove = [
+            "class_weight",
+            "fail_if_nothing_learned",
+        ]
+        for param in params_to_remove:
+            if param in params:  # it should be
+                # Drop from params
+                del params[param]
 
         return params
+
+
+class XGBoostCV(xgb.XGBClassifier):
+    def __init__(
+        self,
+        cv: sklearn.model_selection.BaseCrossValidator,
+        param_grid: Optional[dict] = None,
+        max_num_trees: int = 200,
+        n_jobs: int = 1,
+        # Specify metric and objective for binary and multiclass settings.
+        metric_binary: str = "logloss",
+        metric_multiclass: str = "mlogloss",
+        objective_binary: str = "binary:logistic",
+        objective_multiclass: str = "multi:softprob",
+        # Specify whether lower score is considered better for the chosen metric.
+        metric_lower_is_better: bool = True,
+        **kwargs,
+    ):
+        """
+        Run cross-validation to choose the best hyperparameters for an XGBoost model.
+
+        Param_grid: list of hyperparameter dicts to try.
+            Make sure the parameter names are valid for both xgboost's native API and xgboost's sklearn API.
+            Do not include number of trees (called "num_boost_round" in native API, aka "n_estimators" for xgboost's sklearn API)
+            Do not include early_stopping_rounds
+            If not supplied, we try a small set of learning rates and min_child_weights.
+            See https://xgboost.readthedocs.io/en/release_1.7.0/parameter.html
+        """
+        super().__init__(**kwargs)
+        # Make sure to register these parameters for removal in get_xgb_params()
+        self.cv = cv
+        self.param_grid = param_grid
+        self.max_num_trees = max_num_trees
+        self.n_jobs = n_jobs
+        self.metric_binary = metric_binary
+        self.metric_multiclass = metric_multiclass
+        self.objective_binary = objective_binary
+        self.objective_multiclass = objective_multiclass
+        self.metric_lower_is_better = metric_lower_is_better
+
+    def get_xgb_params(self) -> Dict[str, Any]:
+        """
+        Get xgboost-specific parameters to be passed into the underlying xgboost C++ code.
+        Override the default get_xgb_params() implementation to exclude our wrapper's class_weight parameter from being passed through into xgboost core.
+        """
+        # Original implementation: https://github.com/dmlc/xgboost/blob/d4d7097accc4db7d50fdc2b71b643925db6bc424/python-package/xgboost/sklearn.py#L795-L816
+        params = super().get_xgb_params()
+
+        params_to_remove = [
+            "cv",
+            "param_grid",
+            "max_num_trees",
+            "metric_binary",
+            "metric_multiclass",
+            "objective_binary",
+            "objective_multiclass",
+            "metric_lower_is_better",
+        ]
+        for param in params_to_remove:
+            if param in params:
+                # Drop from params
+                del params[param]
+
+        return params
+
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        sample_weight: Optional[np.ndarray] = None,
+        groups: Optional[np.ndarray] = None,
+        **kwargs,
+    ):
+        """
+        Fit with cross validation.
+        """
+
+        # Choose hyperparameter tuning grid
+        param_grid = self.param_grid
+        if param_grid is None:
+            # Configure small default hyperparameter tuning grid.
+            # Do this here for two reasons:
+            # - can't prespecify this list in __init__ arguments: mutable default argument issue
+            # - sklearn convention frowns upon logic that changes any parameters during __init__
+            param_grid = [
+                {"learning_rate": lr, "min_child_weight": mcw}
+                for lr in [0.1, 0.01, 0.3]  # default is 0.3
+                for mcw in [1, 5]  # default is 1
+                # Other possibilities: "max_depth": [3, 6], "gamma": [0, 0.25], "colsample_bytree": [0.5, 1]
+            ]
+
+        # Choose metric and objective
+        # For objective, see https://github.com/dmlc/xgboost/blob/73713de6016163252958463147c9c6cd509e79b1/python-package/xgboost/sklearn.py#L1477-L1488 and https://xgboost.readthedocs.io/en/stable/parameter.html#learning-task-parameters
+        unique_classes = np.unique(y)  # Assuming y is your target variable
+        if len(unique_classes) == 2:
+            # binary
+            metric = self.metric_binary
+            extra_params = {"objective": self.objective_binary}
+        else:
+            # multiclass
+            metric = self.metric_multiclass
+            extra_params = {
+                "objective": self.objective_multiclass,
+                "num_class": len(unique_classes),
+            }
+
+        # Execute the cross-validation splitting with groups argument, if provided.
+        # Then we will pass the computed indices to xgboost's built-in cv method.
+        # The reason to do this is that xgboost's built-in cv method will not feed the groups argument through.
+        # First, detect whether cv accepts groups or not:
+        def accepts_groups(cv_method):
+            params = inspect.signature(cv_method).parameters
+            return "groups" in params
+
+        if accepts_groups(self.cv.split):
+            cv_splits = list(self.cv.split(X, y, groups=groups))
+        else:
+            cv_splits = list(self.cv.split(X, y))
+
+        # Convert to DMatrix in order to use xgboost's built-in CV
+        dtrain = xgb.DMatrix(data=X, label=y, weight=sample_weight)
+
+        # Define a function to perform cross-validation for a single set of parameters
+        def run_cv(params, dtrain, cv_splits):
+            """
+            Given one parameter dictionary, returns tuple with:
+                - best_score
+                - parameter dictionary again
+                - best number of iterations (boosting rounds) according to early stopping
+            """
+            cv_results = xgb.cv(
+                dtrain=dtrain,
+                # using syntax compatible with python<3.9:
+                params={
+                    **params,
+                    **extra_params,
+                },
+                nfold=len(cv_splits),
+                folds=cv_splits,
+                # Use maximum number of boosting rounds (maximum n_estimators).
+                # Early stopping will find the optimal number of boosting rounds
+                num_boost_round=self.max_num_trees,
+                early_stopping_rounds=10,
+                metrics=metric,
+                as_pandas=True,
+                # This seed is ignored. (It's used to generate the folds, which has already happened by this point. Configure the seed in the cv object instead.)
+                seed=0,
+                # Later, consider custom callbacks: https://katerynad.github.io/XGBoost%20CV/XGBoost%20CV%20callback%20functions.htm
+                # They might let us introspect the models and reject any with all-0 feature importances.
+            )
+
+            # Get best score and best number of boosting rounds (iterations) according to early stopping
+            # Early stopping will terminate cv_results early. If one CV fold stops improving before others, we believe its last performance metric will be repeated for subsequent iterations of the other folds.
+            average_scores_on_held_out_set = cv_results[f"test-{metric}-mean"]
+            if self.metric_lower_is_better:
+                # We should minimize
+                best_score = np.min(average_scores_on_held_out_set)
+                best_iteration = np.argmin(average_scores_on_held_out_set)
+            else:
+                best_score = np.max(average_scores_on_held_out_set)
+                best_iteration = np.argmax(average_scores_on_held_out_set)
+
+            # Adjusting the best iteration (Python is 0-indexed, but iteration counts start at 1)
+            best_iteration += 1  # to reflect the iteration count accurately
+
+            return best_score, params, best_iteration
+
+        # Prepare to run in parallel
+        results = Parallel(n_jobs=self.n_jobs, verbose=10)(
+            delayed(run_cv)(params, dtrain, cv_splits) for params in param_grid
+        )
+
+        # Find the best score and corresponding parameters
+        optimization_function = min if self.metric_lower_is_better else max
+        best_score, best_params, best_num_boost_round = optimization_function(
+            results, key=lambda x: x[0]
+        )
+
+        # Train final model on the full dataset with the best parameters and number of boosting rounds
+        # Let's use the sklearn API now.
+        # Configure the classifier with the best parameters:
+        self.set_params(
+            # Train the final model using the best number of boosting rounds from CV, according to early stopping:
+            n_estimators=best_num_boost_round,
+            # Unpack all the other best parameters:
+            **best_params,
+        )
+
+        # Fit the final model on the full dataset
+        super().fit(X, y, sample_weight=sample_weight, **kwargs)
+
+        return self
+
+
+class XGBoostClassifierWithLabelEncodingWithCV(
+    XGBoostClassifierWithLabelEncoding, XGBoostCV
+):
+    """
+    XGBoostClassifierWithLabelEncoding but with XGBoostCV under the hood rather than XGBClassifier.
+    See XGBoostClassifierWithLabelEncoding and XGBoostCV docs for details.
+    """
+
+    # We use multiple inheritance to combine the two classes.
+    # Through the module resolution order, we ensure that XGBoostClassifierWithLabelEncoding.fit() will call XGBoostCV.fit() rather than XGBClassifier.fit(). XGBoostCV.fit() will of course eventually call XGBClassifier.fit().
+    def __init__(
+        self,
+        cv: sklearn.model_selection.BaseCrossValidator,
+        param_grid: Optional[dict] = None,
+        max_num_trees: int = 200,
+        n_jobs: int = 1,
+        metric_binary: str = "logloss",
+        metric_multiclass: str = "mlogloss",
+        metric_lower_is_better: bool = True,
+        class_weight: Optional[Union[dict, str]] = None,
+        fail_if_nothing_learned: bool = True,
+        **kwargs,
+    ):
+        super().__init__(
+            cv=cv,
+            param_grid=param_grid,
+            max_num_trees=max_num_trees,
+            n_jobs=n_jobs,
+            metric_binary=metric_binary,
+            metric_multiclass=metric_multiclass,
+            metric_lower_is_better=metric_lower_is_better,
+            class_weight=class_weight,
+            fail_if_nothing_learned=fail_if_nothing_learned,
+            **kwargs,
+        )
