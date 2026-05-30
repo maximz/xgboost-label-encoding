@@ -1,19 +1,14 @@
-# Xgboost Label Encoding (WIP)
+# xgboost-label-encoding
 
-[![](https://img.shields.io/pypi/v/xgboost_label_encoding.svg)](https://pypi.python.org/pypi/xgboost_label_encoding)
-[![CI](https://github.com/maximz/xgboost-label-encoding/actions/workflows/ci.yaml/badge.svg?branch=master)](https://github.com/maximz/xgboost-label-encoding/actions/workflows/ci.yaml)
-[![](https://img.shields.io/badge/docs-here-blue.svg)](https://xgboost-label-encoding.maximz.com)
-[![](https://img.shields.io/github/stars/maximz/xgboost-label-encoding?style=social)](https://github.com/maximz/xgboost-label-encoding)
+`xgboost-label-encoding` provides small sklearn-style wrappers around
+`xgboost.XGBClassifier` for classification workflows where the target labels are
+strings or other non-numeric values.
 
-## TODOs: Configuring this template
-
-Create a Netlify site for your repository, then turn off automatic builds in Netlify settings.
-
-Add these CI secrets: `PYPI_API_TOKEN`, `NETLIFY_AUTH_TOKEN` (Netlify user settings - personal access tokens), `DEV_NETLIFY_SITE_ID`, `PROD_NETLIFY_SITE_ID` (API ID from Netlify site settings)
-
-Set up Codecov at TODO
-
-## Overview
+XGBoost trains on numeric class labels. This package encodes `y` during `fit`,
+trains the underlying XGBoost classifier, and decodes predictions back to the
+original labels. It is intended to be used as a drop-in estimator in places where
+manually applying `sklearn.preprocessing.LabelEncoder` to the target would be
+awkward.
 
 ## Installation
 
@@ -21,36 +16,94 @@ Set up Codecov at TODO
 pip install xgboost_label_encoding
 ```
 
+The package requires Python 3.8+ and installs against `xgboost<2`.
+
+For local development:
+
+```bash
+pip install -r requirements_dev.txt
+pip install -e .
+make test
+```
+
 ## Usage
+
+Use `XGBoostClassifierWithLabelEncoding` in place of `xgboost.XGBClassifier`:
+
+```python
+from xgboost_label_encoding import XGBoostClassifierWithLabelEncoding
+
+clf = XGBoostClassifierWithLabelEncoding(
+    n_estimators=100,
+    class_weight="balanced",
+)
+
+clf.fit(X_train, y_train)  # y_train may contain labels like "Healthy" or "HIV"
+
+labels = clf.predict(X_test)
+probabilities = clf.predict_proba(X_test)
+classes = clf.classes_
+```
+
+Most XGBoost classifier parameters are passed through unchanged. The wrapper adds
+these project-specific options:
+
+- `class_weight`: passed to `sklearn.utils.class_weight.compute_sample_weight`;
+  if `sample_weight` is also supplied, the two weights are multiplied.
+- `fail_if_nothing_learned`: defaults to `True`; raises `ValueError` after
+  fitting if all feature importances are zero.
+
+## Cross-Validated Fitting
+
+`XGBoostClassifierWithLabelEncodingWithCV` combines label encoding with
+cross-validation over XGBoost parameters:
+
+```python
+from sklearn.model_selection import StratifiedKFold
+from xgboost_label_encoding import XGBoostClassifierWithLabelEncodingWithCV
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+clf = XGBoostClassifierWithLabelEncodingWithCV(
+    cv=cv,
+    max_num_trees=200,
+    early_stopping_patience=10,
+    class_weight="balanced",
+)
+
+clf.fit(X_train, y_train)
+```
+
+During `fit`, the CV wrapper:
+
+- builds a small default grid of `learning_rate` and `min_child_weight` values
+  unless `param_grid` is provided;
+- runs `xgboost.cv` with early stopping for each parameter set;
+- selects the best parameter set and number of boosting rounds;
+- fits the final classifier on the full training data.
+
+If the provided CV splitter accepts a `groups` argument, `groups` can be passed
+to `fit`.
+
+## Behavior And Limitations
+
+- Training data must contain at least two classes.
+- `predict` returns original labels, not encoded integers.
+- `predict_proba` returns one probability column per class in `clf.classes_`.
+- For pandas DataFrame inputs, feature names containing `[`, `]`, or `<` are
+  renamed internally before reaching XGBoost. `feature_names_in_` still exposes
+  the original feature names, and the same renaming is applied during
+  `predict` and `predict_proba`.
+- `XGBoostCV` is also available as a standalone helper for numeric-label
+  XGBoost classification with CV-selected hyperparameters and tree count.
 
 ## Development
 
-Submit PRs against `develop` branch, then make a release pull request to `master`.
+Useful local commands:
 
 ```bash
-# Optional: set up a pyenv virtualenv
-pyenv virtualenv 3.9 xgboost_label_encoding-3.9
-echo "xgboost_label_encoding-3.9" > .python-version
-pyenv version
-
-# Install requirements
-pip install --upgrade pip wheel
-pip install -r requirements_dev.txt
-
-# Install local package
-pip install -e .
-
-# Install pre-commit
-pre-commit install
-
-# Run tests
 make test
-
-# Run lint
 make lint
-
-# bump version before submitting a PR against master (all master commits are deployed)
-bump2version patch # possible: major / minor / patch
-
-# also ensure CHANGELOG.md updated
+make docs
+make dist
 ```
